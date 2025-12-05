@@ -19,6 +19,9 @@ builder.Services.AddControllers()
 builder.Services.AddDbContext<EromodeshopDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddDbContext<VentasDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("VentasConnection"))); // ⬅️ SQL Server
+
 // Add JWT Authentication
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var key = Encoding.ASCII.GetBytes(jwtSettings["Key"]!);

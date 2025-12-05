@@ -15,8 +15,9 @@ namespace eromodeshopp.Data
         public DbSet<Carrito> Carrito { get; set; }
         public DbSet<Orden> Orden { get; set; }
         public DbSet<DetalleOrden> DetalleOrden { get; set; }
-
         public DbSet<ImagenProducto> ImagenesProducto { get; set; }
+        // 👇 Añade este DbSet para HechoVentas
+        public DbSet<HechoVentas> HechoVentas { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -56,6 +57,8 @@ namespace eromodeshopp.Data
                 .WithMany(u => u.Ordenes)
                 .HasForeignKey(o => o.IdUsuario);
 
+            
+
             // Nombres de tablas
             modelBuilder.Entity<Usuario>().ToTable("Usuarios");
             modelBuilder.Entity<Marca>().ToTable("Marcas");
@@ -65,6 +68,7 @@ namespace eromodeshopp.Data
             modelBuilder.Entity<Carrito>().ToTable("Carrito");
             modelBuilder.Entity<Orden>().ToTable("Ordenes");
             modelBuilder.Entity<DetalleOrden>().ToTable("DetalleOrden");
+
 
             base.OnModelCreating(modelBuilder);
         }

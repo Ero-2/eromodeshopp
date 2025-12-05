@@ -7,6 +7,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using BC = BCrypt.Net.BCrypt;
+using Microsoft.AspNetCore.Authorization; // 👈 Importante para [Authorize]
 
 namespace eromodeshopp.Controllers
 {
@@ -46,7 +47,6 @@ namespace eromodeshopp.Controllers
                 PasswordHash = passwordHash,
                 FechaCreacion = DateTime.UtcNow,
                 FechaModificacion = DateTime.UtcNow
-                // Asegúrate de que EsAdmin = false por defecto en la BD o al crear
             };
 
             _context.Usuarios.Add(usuario);
@@ -70,7 +70,6 @@ namespace eromodeshopp.Controllers
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"]));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
-            // 🔹 Añadir rol al token
             var role = usuario.EsAdmin ? "Admin" : "User";
 
             var claims = new[]
@@ -78,7 +77,7 @@ namespace eromodeshopp.Controllers
                 new Claim(ClaimTypes.NameIdentifier, usuario.IdUsuario.ToString()),
                 new Claim(ClaimTypes.Email, usuario.Email),
                 new Claim(ClaimTypes.Name, usuario.Nombre),
-                new Claim("role", role) // 👈 Claim personalizado
+                new Claim("role", role)
             };
 
             var token = new JwtSecurityToken(
@@ -99,6 +98,38 @@ namespace eromodeshopp.Controllers
             });
         }
 
+        // ⭐ CAMBIO CLAVE: Se agregó [Authorize]
+        [HttpGet("perfil")]
+        [Authorize]
+        public async Task<ActionResult<PerfilDTO>> GetPerfilUsuario()
+        {
+            var idUsuarioClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(idUsuarioClaim) || !int.TryParse(idUsuarioClaim, out int idUsuario))
+            {
+                // Este retorno 401 debería ser ahora manejado por el middleware de autenticación 
+                // si el token es inválido o falta, pero se mantiene como fallback.
+                return Unauthorized();
+            }
+
+            var usuario = await _context.Usuarios.FindAsync(idUsuario);
+            if (usuario == null)
+            {
+                return NotFound();
+            }
+
+            // Mapea a PerfilDTO para no exponer el PasswordHash
+            var perfilDto = new PerfilDTO
+            {
+                IdUsuario = usuario.IdUsuario,
+                Nombre = usuario.Nombre,
+                Apellido = usuario.Apellido,
+                Email = usuario.Email,
+                FechaCreacion = usuario.FechaCreacion
+            };
+
+            return Ok(perfilDto);
+        }
+
         [HttpGet("generar-hash")]
         public IActionResult GenerarHashTemporal([FromQuery] string password = "1234")
         {
@@ -114,6 +145,10 @@ namespace eromodeshopp.Controllers
             return Ok(usuario);
         }
     }
+
+    // ----------------------------------------------------
+    // CLASES DTO Y MODELOS
+    // ----------------------------------------------------
 
     public class RegisterModel
     {
@@ -134,5 +169,15 @@ namespace eromodeshopp.Controllers
         public string Token { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string Nombre { get; set; } = string.Empty;
+    }
+
+    // Data Transfer Object para el Perfil (Seguro)
+    public class PerfilDTO
+    {
+        public int IdUsuario { get; set; }
+        public string Nombre { get; set; } = string.Empty;
+        public string? Apellido { get; set; }
+        public string Email { get; set; } = string.Empty;
+        public DateTime FechaCreacion { get; set; }
     }
 }

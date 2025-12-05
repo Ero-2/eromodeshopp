@@ -13,10 +13,12 @@ namespace eromodeshopp.Controllers
     public class OrdenController : ControllerBase
     {
         private readonly EromodeshopDbContext _context;
+        private readonly VentasDbContext _ventasContext;
 
-        public OrdenController(EromodeshopDbContext context)
+        public OrdenController(EromodeshopDbContext context, VentasDbContext ventasContext)
         {
             _context = context;
+            _ventasContext = ventasContext;
         }
 
         // POST: api/orden/checkout
@@ -30,21 +32,19 @@ namespace eromodeshopp.Controllers
                 return Unauthorized(new { error = "Token inválido o usuario no encontrado." });
             }
 
-            // ⭐ Validar que vengan productos en el request
             if (request.Productos == null || !request.Productos.Any())
             {
                 return BadRequest(new { error = "El carrito está vacío." });
             }
 
-            // ⭐ Validar stock y obtener datos de cada producto
             decimal total = 0;
             var detallesOrden = new List<DetalleOrden>();
 
             foreach (var producto in request.Productos)
             {
-                // Buscar el inventario por IdProducto + Talla
                 var inventario = await _context.Inventario
                     .Include(i => i.Producto)
+                        .ThenInclude(p => p.Marca)
                     .Include(i => i.Talla)
                     .FirstOrDefaultAsync(i =>
                         i.IdProducto == producto.IdProducto &&
@@ -66,27 +66,22 @@ namespace eromodeshopp.Controllers
                     });
                 }
 
-                // Calcular subtotal
                 total += inventario.Producto.Precio * producto.Cantidad;
 
-                // Preparar detalle de orden (lo guardamos después)
                 detallesOrden.Add(new DetalleOrden
                 {
                     IdInventario = inventario.IdInventario,
                     Cantidad = producto.Cantidad,
                     PrecioUnitario = inventario.Producto.Precio,
                     FechaCreacion = DateTime.UtcNow,
-                    FechaModificacion = DateTime.UtcNow,
-                    Inventario = inventario // Para la respuesta
+                    FechaModificacion = DateTime.UtcNow
                 });
 
-                // Reducir stock
                 inventario.Stock -= producto.Cantidad;
                 inventario.FechaModificacion = DateTime.UtcNow;
                 _context.Entry(inventario).State = EntityState.Modified;
             }
 
-            // Crear la orden
             var orden = new Orden
             {
                 IdUsuario = userId,
@@ -99,9 +94,8 @@ namespace eromodeshopp.Controllers
             };
 
             _context.Orden.Add(orden);
-            await _context.SaveChangesAsync(); // Guardar para obtener IdOrden
+            await _context.SaveChangesAsync();
 
-            // Asignar IdOrden a los detalles y guardar
             foreach (var detalle in detallesOrden)
             {
                 detalle.IdOrden = orden.IdOrden;
@@ -110,7 +104,10 @@ namespace eromodeshopp.Controllers
             _context.DetalleOrden.AddRange(detallesOrden);
             await _context.SaveChangesAsync();
 
-            // Limpiar carrito de la BD si existe (opcional)
+            // 🔥 SINCRONIZAR CON BASE DE DATOS DE VENTAS (SQL SERVER)
+            await SincronizarConVentasAsync(orden, detallesOrden);
+
+            // Limpiar carrito (opcional)
             var carritoItems = await _context.Carrito
                 .Where(c => c.IdUsuario == userId)
                 .ToListAsync();
@@ -120,7 +117,6 @@ namespace eromodeshopp.Controllers
                 await _context.SaveChangesAsync();
             }
 
-            // Devolver respuesta
             var ordenResponse = new OrdenResponse
             {
                 IdOrden = orden.IdOrden,
@@ -128,8 +124,14 @@ namespace eromodeshopp.Controllers
                 FechaOrden = orden.FechaOrden,
                 Productos = detallesOrden.Select(d => new ProductoEnOrden
                 {
-                    Nombre = d.Inventario.Producto.Nombre,
-                    Talla = d.Inventario.Talla.NombreTalla,
+                    Nombre = _context.Inventario
+                        .Include(i => i.Producto)
+                        .First(i => i.IdInventario == d.IdInventario)
+                        .Producto.Nombre,
+                    Talla = _context.Inventario
+                        .Include(i => i.Talla)
+                        .First(i => i.IdInventario == d.IdInventario)
+                        .Talla.NombreTalla,
                     Cantidad = d.Cantidad,
                     PrecioUnitario = d.PrecioUnitario
                 }).ToList()
@@ -162,14 +164,58 @@ namespace eromodeshopp.Controllers
             return Ok(ordenes);
         }
 
-        // ⭐ DTOs actualizados
+        // 🔁 MÉTODO PRIVADO: Sincroniza la venta con SQL Server
+        private async Task SincronizarConVentasAsync(Orden orden, List<DetalleOrden> detalles)
+        {
+            try
+            {
+                var usuario = await _context.Usuarios
+                    .FirstOrDefaultAsync(u => u.IdUsuario == orden.IdUsuario);
+
+                foreach (var detalle in detalles)
+                {
+                    var inventario = await _context.Inventario
+                        .Include(i => i.Producto)
+                            .ThenInclude(p => p.Marca)
+                        .Include(i => i.Talla)
+                        .FirstAsync(i => i.IdInventario == detalle.IdInventario);
+
+                    var hecho = new HechoVentas
+                    {
+                        IdOrden = orden.IdOrden,
+                        IdUsuario = orden.IdUsuario,
+                        IdProducto = inventario.IdProducto,
+                        NombreProducto = inventario.Producto.Nombre,
+                        Marca = inventario.Producto.Marca.Nombre,
+                        Talla = inventario.Talla.NombreTalla,
+                        Cantidad = detalle.Cantidad,
+                        PrecioUnitario = detalle.PrecioUnitario,
+                        FechaOrden = orden.FechaOrden,
+                        MetodoPago = orden.MetodoPago,
+                        EmailUsuario = usuario?.Email ?? "desconocido@example.com"
+                    };
+
+                    _ventasContext.HechoVentas.Add(hecho);
+                }
+
+                await _ventasContext.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                // En desarrollo: imprimir error. En producción: usar ILogger
+                Console.WriteLine($"[ERROR VENTAS] {ex.Message}");
+                // No lanzamos excepción: no queremos romper el checkout
+            }
+        }
+
+        // ⭐ DTOs
         public class CheckoutRequest
         {
             public string Nombre { get; set; } = string.Empty;
             public string Email { get; set; } = string.Empty;
             public string DireccionEnvio { get; set; } = string.Empty;
             public string MetodoPago { get; set; } = string.Empty;
-            public List<ProductoCheckout> Productos { get; set; } = new(); // ⭐ NUEVO
+            public List<ProductoCheckout> Productos { get; set; } = new();
         }
 
         public class ProductoCheckout
