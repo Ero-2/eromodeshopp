@@ -68,13 +68,16 @@ namespace eromodeshopp.Controllers
 
                 total += inventario.Producto.Precio * producto.Cantidad;
 
+                // ✅ AGREGAR Status = "pendiente" al crear el detalle
                 detallesOrden.Add(new DetalleOrden
                 {
                     IdInventario = inventario.IdInventario,
                     Cantidad = producto.Cantidad,
                     PrecioUnitario = inventario.Producto.Precio,
+                    Status = "pendiente", // ⭐ NUEVO: Estado inicial
                     FechaCreacion = DateTime.UtcNow,
-                    FechaModificacion = DateTime.UtcNow
+                    FechaModificacion = DateTime.UtcNow,
+                    UsuarioCreacion = User.Identity?.Name ?? "sistema"
                 });
 
                 inventario.Stock -= producto.Cantidad;
@@ -164,6 +167,51 @@ namespace eromodeshopp.Controllers
             return Ok(ordenes);
         }
 
+        // ✅ NUEVO: GET api/orden/{id}/detalles - Obtener detalles de una orden específica
+        [HttpGet("{id}/detalles")]
+        public async Task<ActionResult> GetDetallesOrden(int id)
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+            {
+                return Unauthorized(new { error = "Token inválido." });
+            }
+
+            // Verificar que la orden pertenezca al usuario
+            var orden = await _context.Orden
+                .FirstOrDefaultAsync(o => o.IdOrden == id && o.IdUsuario == userId);
+
+            if (orden == null)
+            {
+                return NotFound(new { error = "Orden no encontrada" });
+            }
+
+            var detalles = await _context.DetalleOrden
+                .Include(d => d.Inventario)
+                    .ThenInclude(i => i.Producto)
+                .Include(d => d.Inventario)
+                    .ThenInclude(i => i.Talla)
+                .Where(d => d.IdOrden == id)
+                .Select(d => new
+                {
+                    idDetalleOrden = d.IdDetalleOrden,
+                    producto = d.Inventario.Producto.Nombre,
+                    talla = d.Inventario.Talla.NombreTalla,
+                    cantidad = d.Cantidad,
+                    precioUnitario = d.PrecioUnitario,
+                    subtotal = d.Subtotal,
+                    status = d.Status, // ✅ Ahora funciona porque el modelo mapea bien la columna
+                    nombreEstado = d.NombreEstado,
+                    colorEstado = d.ColorEstado,
+                    iconoEstado = d.IconoEstado,
+                    progreso = d.Progreso
+                })
+                .ToListAsync();
+
+            return Ok(detalles);
+        }
+
         // 🔁 MÉTODO PRIVADO: Sincroniza la venta con SQL Server
         private async Task SincronizarConVentasAsync(Orden orden, List<DetalleOrden> detalles)
         {
@@ -202,9 +250,7 @@ namespace eromodeshopp.Controllers
             }
             catch (Exception ex)
             {
-                // En desarrollo: imprimir error. En producción: usar ILogger
                 Console.WriteLine($"[ERROR VENTAS] {ex.Message}");
-                // No lanzamos excepción: no queremos romper el checkout
             }
         }
 

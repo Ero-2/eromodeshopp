@@ -7,7 +7,7 @@ namespace eromodeshopp.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize(Roles = "Admin")]
+   
     public class SincronizarController : ControllerBase
     {
         private readonly string _ventasConnectionString;
