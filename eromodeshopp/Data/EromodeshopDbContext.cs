@@ -1,4 +1,5 @@
-﻿using eromodeshopp.Models;
+﻿
+using eromodeshopp.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace eromodeshopp.Data
@@ -18,6 +19,8 @@ namespace eromodeshopp.Data
         public DbSet<ImagenProducto> ImagenesProducto { get; set; }
         // 👇 Añade este DbSet para HechoVentas
         public DbSet<HechoVentas> HechoVentas { get; set; } = null!;
+
+        public DbSet<DetallePago> DetallePago { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

@@ -212,6 +212,31 @@ namespace eromodeshopp.Controllers
             return Ok(detalles);
         }
 
+        // ... (Código anterior omitido)
+
+        [HttpGet("pendientes")]
+        [Authorize]
+        public async Task<IActionResult> GetOrdenesPendientes()
+        {
+            // ⭐ CORRECCIÓN: Usar ClaimTypes.NameIdentifier para obtener el ID del usuario autenticado
+            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+            {
+                return Unauthorized(new { error = "Token inválido o usuario no encontrado." });
+            }
+
+            // El filtro ahora se aplicará al userId correcto.
+            var ordenes = await _context.Orden
+                .Where(o => o.IdUsuario == userId && o.status == "pendiente" && o.referencia == null)
+                .Include(o => o.DetallesOrden)
+                .ToListAsync();
+
+            return Ok(ordenes);
+        }
+
+        // ... (Código posterior omitido)
+
         // 🔁 MÉTODO PRIVADO: Sincroniza la venta con SQL Server
         private async Task SincronizarConVentasAsync(Orden orden, List<DetalleOrden> detalles)
         {
