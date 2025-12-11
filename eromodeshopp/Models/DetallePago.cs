@@ -27,6 +27,13 @@ namespace eromodeshopp.Models
 
         public DateTime fechaCreacion { get; set; } = DateTime.UtcNow;
 
+        // ✅ Nuevas columnas para pagos con tarjeta
+        [StringLength(20)]
+        public string? cardbrand { get; set; } // Ej: "Visa", "Mastercard"
+
+        [StringLength(4)]
+        public string? cardlast4 { get; set; } // Últimos 4 dígitos de la tarjeta
+
         // Relación con Orden
         [ForeignKey("idOrden")]
         public virtual Orden orden { get; set; }

@@ -68,13 +68,12 @@ namespace eromodeshopp.Controllers
 
                 total += inventario.Producto.Precio * producto.Cantidad;
 
-                // ✅ AGREGAR Status = "pendiente" al crear el detalle
                 detallesOrden.Add(new DetalleOrden
                 {
                     IdInventario = inventario.IdInventario,
                     Cantidad = producto.Cantidad,
                     PrecioUnitario = inventario.Producto.Precio,
-                    Status = "pendiente", // ⭐ NUEVO: Estado inicial
+                    Status = "pendiente",
                     FechaCreacion = DateTime.UtcNow,
                     FechaModificacion = DateTime.UtcNow,
                     UsuarioCreacion = User.Identity?.Name ?? "sistema"
@@ -93,7 +92,9 @@ namespace eromodeshopp.Controllers
                 FechaCreacion = DateTime.UtcNow,
                 FechaModificacion = DateTime.UtcNow,
                 DireccionEnvio = request.DireccionEnvio,
-                MetodoPago = request.MetodoPago
+                MetodoPago = request.MetodoPago,
+                status = "pendiente",
+                referencia = null
             };
 
             _context.Orden.Add(orden);
@@ -107,10 +108,33 @@ namespace eromodeshopp.Controllers
             _context.DetalleOrden.AddRange(detallesOrden);
             await _context.SaveChangesAsync();
 
-            // 🔥 SINCRONIZAR CON BASE DE DATOS DE VENTAS (SQL SERVER)
+            // 🔥 Sincronizar con base de datos de ventas (SQL Server)
             await SincronizarConVentasAsync(orden, detallesOrden);
 
-            // Limpiar carrito (opcional)
+            // ⭐ MANEJO ESPECIAL PARA TARJETA
+            if (request.MetodoPago.ToLower() == "tarjeta")
+            {
+                string referencia = GenerateReference();
+
+                orden.referencia = referencia;
+                orden.status = "procesado";
+                _context.Orden.Update(orden);
+
+                var detallePago = new DetallePago
+                {
+                    idOrden = orden.IdOrden,
+                    formaPago = request.MetodoPago,
+                    status = "completado",
+                    referencia = referencia,
+                    cardbrand = GetCardBrand(request.numeroTarjeta),
+                    cardlast4 = GetLastFourDigits(request.numeroTarjeta)
+                };
+
+                _context.DetallePago.Add(detallePago);
+                await _context.SaveChangesAsync();
+            }
+
+            // Limpiar carrito
             var carritoItems = await _context.Carrito
                 .Where(c => c.IdUsuario == userId)
                 .ToListAsync();
@@ -167,18 +191,16 @@ namespace eromodeshopp.Controllers
             return Ok(ordenes);
         }
 
-        // ✅ NUEVO: GET api/orden/{id}/detalles - Obtener detalles de una orden específica
+        // ✅ GET: api/orden/{id}/detalles - Con estados enriquecidos y porcentajes correctos
         [HttpGet("{id}/detalles")]
         public async Task<ActionResult> GetDetallesOrden(int id)
         {
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
             if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
             {
                 return Unauthorized(new { error = "Token inválido." });
             }
 
-            // Verificar que la orden pertenezca al usuario
             var orden = await _context.Orden
                 .FirstOrDefaultAsync(o => o.IdOrden == id && o.IdUsuario == userId);
 
@@ -193,51 +215,71 @@ namespace eromodeshopp.Controllers
                 .Include(d => d.Inventario)
                     .ThenInclude(i => i.Talla)
                 .Where(d => d.IdOrden == id)
-                .Select(d => new
-                {
-                    idDetalleOrden = d.IdDetalleOrden,
-                    producto = d.Inventario.Producto.Nombre,
-                    talla = d.Inventario.Talla.NombreTalla,
-                    cantidad = d.Cantidad,
-                    precioUnitario = d.PrecioUnitario,
-                    subtotal = d.Subtotal,
-                    status = d.Status, // ✅ Ahora funciona porque el modelo mapea bien la columna
-                    nombreEstado = d.NombreEstado,
-                    colorEstado = d.ColorEstado,
-                    iconoEstado = d.IconoEstado,
-                    progreso = d.Progreso
-                })
                 .ToListAsync();
 
-            return Ok(detalles);
-        }
-
-        // ... (Código anterior omitido)
-
-        [HttpGet("pendientes")]
-        [Authorize]
-        public async Task<IActionResult> GetOrdenesPendientes()
-        {
-            // ⭐ CORRECCIÓN: Usar ClaimTypes.NameIdentifier para obtener el ID del usuario autenticado
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-
-            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+            var detallesConEstado = detalles.Select(d => new
             {
-                return Unauthorized(new { error = "Token inválido o usuario no encontrado." });
-            }
+                idDetalleOrden = d.IdDetalleOrden,
+                producto = d.Inventario.Producto.Nombre,
+                talla = d.Inventario.Talla.NombreTalla,
+                cantidad = d.Cantidad,
+                precioUnitario = d.PrecioUnitario,
+                subtotal = d.Subtotal,
+                status = d.Status,
+                nombreEstado = d.Status switch
+                {
+                    "pendiente" => "Pendiente",
+                    "preparando" => "En preparación",
+                    "revisado" => "Revisado",
+                    "liberado" => "Liberado",
+                    "entregado" => "Entregado",
+                    "procesado" => "Procesado",
+                    "completado" => "Completado",
+                    "cancelado" => "Cancelado",
+                    _ => "Desconocido"
+                },
+                colorEstado = d.Status switch
+                {
+                    "pendiente" => "#FFA500", // Naranja
+                    "preparando" => "#3B82F6", // Azul
+                    "revisado" => "#9333EA",   // Morado
+                    "liberado" => "#10B981",   // Verde
+                    "entregado" => "#10B981",  // Verde
+                    "procesado" => "#4F46E5",  // Azul Indigo
+                    "completado" => "#10B981", // Verde
+                    "cancelado" => "#EF4444",  // Rojo
+                    _ => "#9CA3AF"             // Gris
+                },
+                iconoEstado = d.Status switch
+                {
+                    "pendiente" => "Clock",
+                    "preparando" => "Package",
+                    "revisado" => "Eye",
+                    "liberado" => "Truck",
+                    "entregado" => "CheckCircle",
+                    "procesado" => "CreditCard",
+                    "completado" => "CheckCircle",
+                    "cancelado" => "XCircle",
+                    _ => "HelpCircle"
+                },
+                progreso = d.Status switch
+                {
+                    "pendiente" => 0,
+                    "preparando" => 25,  // ✅ Corregido a 25%
+                    "revisado" => 50,    // ✅ Corregido a 50%
+                    "liberado" => 75,    // ✅ Corregido a 75%
+                    "entregado" => 100,  // ✅ Corregido a 100%
+                    "procesado" => 50,
+                    "completado" => 100,
+                    "cancelado" => 0,
+                    _ => 0
+                }
+            }).ToList();
 
-            // El filtro ahora se aplicará al userId correcto.
-            var ordenes = await _context.Orden
-                .Where(o => o.IdUsuario == userId && o.status == "pendiente" && o.referencia == null)
-                .Include(o => o.DetallesOrden)
-                .ToListAsync();
-
-            return Ok(ordenes);
+            return Ok(detallesConEstado);
         }
 
-        // ... (Código posterior omitido)
-
-        // 🔁 MÉTODO PRIVADO: Sincroniza la venta con SQL Server
+        // 🔁 MÉTODOS AUXILIARES
         private async Task SincronizarConVentasAsync(Orden orden, List<DetalleOrden> detalles)
         {
             try
@@ -279,6 +321,29 @@ namespace eromodeshopp.Controllers
             }
         }
 
+        private string GenerateReference()
+        {
+            return $"REF-{DateTime.UtcNow:yyyyMMddHHmmss}-{new Random().Next(1000, 9999)}";
+        }
+
+        private string GetCardBrand(string numeroTarjeta)
+        {
+            if (string.IsNullOrEmpty(numeroTarjeta)) return "Desconocida";
+            string clean = numeroTarjeta.Replace(" ", "").Replace("-", "");
+            if (clean.StartsWith("4")) return "Visa";
+            if (clean.StartsWith("5") && clean.Length > 1 && "12345".Contains(clean[1])) return "Mastercard";
+            if (clean.StartsWith("34") || clean.StartsWith("37")) return "American Express";
+            if (clean.StartsWith("6011")) return "Discover";
+            return "Desconocida";
+        }
+
+        private string GetLastFourDigits(string numeroTarjeta)
+        {
+            if (string.IsNullOrEmpty(numeroTarjeta)) return "";
+            string clean = numeroTarjeta.Replace(" ", "").Replace("-", "");
+            return clean.Length >= 4 ? clean.Substring(clean.Length - 4) : "";
+        }
+
         // ⭐ DTOs
         public class CheckoutRequest
         {
@@ -286,6 +351,9 @@ namespace eromodeshopp.Controllers
             public string Email { get; set; } = string.Empty;
             public string DireccionEnvio { get; set; } = string.Empty;
             public string MetodoPago { get; set; } = string.Empty;
+            public string? numeroTarjeta { get; set; }
+            public string? fechaExpiracion { get; set; }
+            public string? cvv { get; set; }
             public List<ProductoCheckout> Productos { get; set; } = new();
         }
 

@@ -1,10 +1,11 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using eromodeshopp.Data;
+using eromodeshopp.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using eromodeshopp.Data;
-using eromodeshopp.Models;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Security.Claims;
+using System.Threading.Tasks;
 
 namespace eromodeshopp.Controllers
 {
@@ -26,18 +27,15 @@ namespace eromodeshopp.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var tokenUser = User.FindFirst("userId")?.Value;
-            if (string.IsNullOrEmpty(tokenUser))
-                return Unauthorized();
-
-            if (!int.TryParse(tokenUser, out var userId))
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
                 return Unauthorized();
 
             using var transaction = await _context.Database.BeginTransactionAsync();
 
             try
             {
-                var orden = await _context.Orden // ← Plural
+                var orden = await _context.Orden
                     .FirstOrDefaultAsync(o =>
                         o.IdOrden == request.idOrden &&
                         o.IdUsuario == userId &&
@@ -49,10 +47,9 @@ namespace eromodeshopp.Controllers
                     return BadRequest("Orden no encontrada, no pertenece a este usuario o el pago ya fue iniciado/procesado.");
 
                 string referencia = GenerateReference();
-
                 orden.referencia = referencia;
                 orden.status = "procesando_pago";
-                _context.Orden.Update(orden); // ← Plural
+                _context.Orden.Update(orden);
 
                 var detallePago = new DetallePago
                 {
@@ -60,11 +57,11 @@ namespace eromodeshopp.Controllers
                     formaPago = request.formaPago,
                     status = "pendiente",
                     referencia = referencia
+                    // cardbrand y cardlast4 no se usan aquí (solo para tarjetas en Checkout)
                 };
 
-                _context.DetallePago.Add(detallePago); // ← Plural
+                _context.DetallePago.Add(detallePago);
                 await _context.SaveChangesAsync();
-
                 await transaction.CommitAsync();
 
                 return Ok(new
