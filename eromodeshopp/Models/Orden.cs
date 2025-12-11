@@ -33,6 +33,8 @@ public class Orden
     [StringLength(20)]
     public string status { get; set; } = "pendiente"; // Valores: 'pendiente', 'procesando_pago', 'completado', 'cancelado'
 
+    // Propiedad de Navegación
+    
     public virtual ICollection<DetalleOrden> DetallesOrden { get; set; } = new List<DetalleOrden>();
     public virtual ICollection<DetallePago> DetallePagos { get; set; } = new List<DetallePago>();
 }

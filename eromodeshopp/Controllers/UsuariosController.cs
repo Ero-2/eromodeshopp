@@ -130,6 +130,23 @@ namespace eromodeshopp.Controllers
             return Ok(perfilDto);
         }
 
+        // NUEVO ENDPOINT: Obtener todos los usuarios
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Usuario>>> GetUsuarios()
+        {
+            try
+            {
+                var usuarios = await _context.Usuarios.ToListAsync();
+                return Ok(usuarios);
+            }
+            catch (Exception ex)
+            {
+                // Log the exception (optional but recommended)
+                return StatusCode(500, new { error = "Ocurrió un error interno al obtener los usuarios.", details = ex.Message });
+            }
+        }
+
+
         [HttpGet("generar-hash")]
         public IActionResult GenerarHashTemporal([FromQuery] string password = "1234")
         {

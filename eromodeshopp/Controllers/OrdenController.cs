@@ -9,7 +9,7 @@ namespace eromodeshopp.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize]
+    [Authorize] // Mantenido el Authorize general
     public class OrdenController : ControllerBase
     {
         private readonly EromodeshopDbContext _context;
@@ -167,7 +167,7 @@ namespace eromodeshopp.Controllers
             return Ok(ordenResponse);
         }
 
-        // GET: api/orden
+        // GET: api/orden (para el usuario autenticado)
         [HttpGet]
         public async Task<ActionResult<IEnumerable<OrdenResumen>>> GetOrdenes()
         {
@@ -189,6 +189,39 @@ namespace eromodeshopp.Controllers
                 .ToListAsync();
 
             return Ok(ordenes);
+        }
+
+        // NUEVO ENDPOINT: Obtener todas las órdenes del sistema (requiere Authorize)
+        // Considera agregar [Authorize(Roles = "Admin")] si solo admins pueden ver todas las órdenes
+        [HttpGet("todas")]
+        public async Task<ActionResult<IEnumerable<OrdenConDetallesDto>>> GetTodasLasOrdenes()
+        {
+            try
+            {
+                // Obtiene todas las órdenes con información básica del usuario
+                var ordenes = await _context.Orden
+                    .Include(o => o.Usuario) // Incluye la relación con Usuario
+                    .Select(o => new OrdenConDetallesDto
+                    {
+                        IdOrden = o.IdOrden,
+                        IdUsuario = o.IdUsuario,
+                        NombreUsuario = o.Usuario.Nombre, // Accede al nombre del usuario relacionado
+                        Total = o.Total,
+                        FechaOrden = o.FechaOrden,
+                        MetodoPago = o.MetodoPago,
+                        DireccionEnvio = o.DireccionEnvio,
+                        Status = o.status,
+                        Referencia = o.referencia
+                    })
+                    .ToListAsync();
+
+                return Ok(ordenes);
+            }
+            catch (Exception ex)
+            {
+                // Log the exception (optional but recommended)
+                return StatusCode(500, new { error = "Ocurrió un error interno al obtener las órdenes.", details = ex.Message });
+            }
         }
 
         // ✅ GET: api/orden/{id}/detalles - Con estados enriquecidos y porcentajes correctos
@@ -386,6 +419,20 @@ namespace eromodeshopp.Controllers
             public int IdOrden { get; set; }
             public decimal Total { get; set; }
             public DateTime FechaOrden { get; set; }
+        }
+
+        // Nuevo DTO para la respuesta de todas las órdenes
+        public class OrdenConDetallesDto
+        {
+            public int IdOrden { get; set; }
+            public int IdUsuario { get; set; }
+            public string NombreUsuario { get; set; } = string.Empty;
+            public decimal Total { get; set; }
+            public DateTime FechaOrden { get; set; }
+            public string MetodoPago { get; set; } = string.Empty;
+            public string DireccionEnvio { get; set; } = string.Empty;
+            public string Status { get; set; } = string.Empty;
+            public string? Referencia { get; set; }
         }
     }
 }
