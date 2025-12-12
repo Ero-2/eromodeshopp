@@ -39,6 +39,7 @@ namespace eromodeshopp.Models
         public virtual Orden Orden { get; set; } = null!;
         public virtual Inventario Inventario { get; set; } = null!;
 
+
         // ✅ PIPELINE DE ESTADOS (igual que en PHP/Laravel)
         public static readonly Dictionary<string, EstadoConfig> PIPELINE = new()
         {

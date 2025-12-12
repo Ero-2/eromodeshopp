@@ -22,6 +22,9 @@ namespace eromodeshopp.Data
 
         public DbSet<DetallePago> DetallePago { get; set; }
 
+        public DbSet<Resena> Resenas { get; set; }
+        public DbSet<Factura> Facturas { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             // Relaciones
