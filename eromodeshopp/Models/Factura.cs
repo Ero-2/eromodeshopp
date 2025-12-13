@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace eromodeshopp.Models
@@ -7,55 +8,67 @@ namespace eromodeshopp.Models
     public class Factura
     {
         [Key]
-        [Column("IdFactura")]
         public int IdFactura { get; set; }
 
-        [Column("IdOrden")]
+        [Required]
         public int IdOrden { get; set; }
 
-        [Column("NumeroFactura")]
+        [Required]
+        [StringLength(50)]
+        [Column(TypeName = "character varying(50)")]
         public string NumeroFactura { get; set; } = string.Empty;
 
-        [Column("FechaEmision")]
-        public DateTime FechaEmision { get; set; } = DateTime.Today;
+        [Required]
+        [Column(TypeName = "date")]
+        public DateTime FechaEmision { get; set; }
 
-        [Column("RUC_DNI_Cliente")]
+        [Required]
+        [StringLength(20)]
+        [Column("RUC_DNI_Cliente", TypeName = "character varying(20)")]
         public string RUC_DNI_Cliente { get; set; } = string.Empty;
 
-        [Column("NombreCliente")]
+        [Required]
+        [StringLength(255)] // Cambiar de 200 a 255 para coincidir con BD
+        [Column("NombreCliente", TypeName = "character varying(255)")]
         public string NombreCliente { get; set; } = string.Empty;
 
-        [Column("DireccionCliente")]
+        [Required]
+        [Column("DireccionCliente", TypeName = "text")]
         public string DireccionCliente { get; set; } = string.Empty;
 
-        [Column("TotalBruto")]
+        [Required]
+        [Column(TypeName = "numeric(10,2)")] // Cambiar de decimal(18,2) a numeric(10,2)
         public decimal TotalBruto { get; set; }
 
-        [Column("Impuestos")]
+        [Required]
+        [Column(TypeName = "numeric(10,2)")]
         public decimal Impuestos { get; set; }
 
-        [Column("TotalNeto")]
+        [Required]
+        [Column(TypeName = "numeric(10,2)")]
         public decimal TotalNeto { get; set; }
 
-        [Column("Estado")]
+        [Required]
+        [StringLength(20)]
+        [Column(TypeName = "character varying(20)")]
         public string Estado { get; set; } = "emitida";
 
-        [Column("PDF_URL")]
+        [Column("PDF_URL", TypeName = "text")]
         public string? PDF_URL { get; set; }
 
-        [Column("FechaCreacion")]
-        public DateTime FechaCreacion { get; set; } = DateTime.UtcNow;
+        [Column(TypeName = "timestamp with time zone")]
+        public DateTime FechaCreacion { get; set; }
 
-        [Column("FechaModificacion")]
-        public DateTime FechaModificacion { get; set; } = DateTime.UtcNow;
+        [Column(TypeName = "timestamp with time zone")]
+        public DateTime FechaModificacion { get; set; }
 
-        [Column("UsuarioCreacion")]
-        public string? UsuarioCreacion { get; set; }
+        [Column(TypeName = "text")]
+        public string UsuarioCreacion { get; set; } = string.Empty;
 
-        [Column("UsuarioModificacion")]
-        public string? UsuarioModificacion { get; set; }
+        [Column(TypeName = "text")]
+        public string UsuarioModificacion { get; set; } = string.Empty;
 
-        // Relación opcional
+        // Relaciones
         [ForeignKey("IdOrden")]
         public virtual Orden? Orden { get; set; }
     }

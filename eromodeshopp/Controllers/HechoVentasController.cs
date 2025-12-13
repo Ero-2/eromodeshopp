@@ -22,7 +22,7 @@ namespace eromodeshopp.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<HechoVentas>>> GetHechoVentas()
         {
-            return await _context.HechoVentas
+           return await _context.HechoVentas
                 .OrderByDescending(v => v.FechaOrden)
                 .ToListAsync();
         }

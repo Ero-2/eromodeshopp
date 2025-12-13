@@ -190,13 +190,21 @@ namespace eromodeshopp.Controllers
         {
             try
             {
+                _logger.LogInformation($"Iniciando generación de factura para orden {idOrden}");
+
                 var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
                 {
                     return Unauthorized(new { error = "Token inválido o usuario no encontrado" });
                 }
 
+                _logger.LogInformation($"Usuario ID: {userId}, RUC/DNI: {request.RUC_DNI_Cliente}, Nombre: {request.NombreCliente}");
+
+                // Validación manual adicional
+                // ... (mantén tus validaciones actuales)
+
                 // Buscar la orden
+                _logger.LogInformation($"Buscando orden {idOrden}...");
                 var orden = await _context.Orden
                     .Include(o => o.Usuario)
                     .Include(o => o.DetallesOrden)
@@ -206,48 +214,46 @@ namespace eromodeshopp.Controllers
 
                 if (orden == null)
                 {
+                    _logger.LogWarning($"Orden {idOrden} no encontrada");
                     return NotFound(new { error = "Orden no encontrada" });
                 }
+
+                _logger.LogInformation($"Orden encontrada: ID {orden.IdOrden}, Total: {orden.Total}, Usuario: {orden.IdUsuario}");
 
                 // Verificar que la orden pertenezca al usuario o sea admin
                 var isAdmin = User.IsInRole("Admin");
                 if (!isAdmin && orden.IdUsuario != userId)
                 {
+                    _logger.LogWarning($"Usuario {userId} no tiene permiso para la orden {idOrden} (propietario: {orden.IdUsuario})");
                     return Forbid();
                 }
 
                 // Verificar que no exista ya una factura para esta orden
+                _logger.LogInformation($"Verificando si ya existe factura para orden {idOrden}...");
                 var facturaExistente = await _context.Facturas
                     .FirstOrDefaultAsync(f => f.IdOrden == idOrden);
 
                 if (facturaExistente != null)
                 {
-                    return Conflict(new { error = "Ya existe una factura para esta orden", idFactura = facturaExistente.IdFactura });
+                    _logger.LogInformation($"Ya existe factura {facturaExistente.IdFactura} para orden {idOrden}");
+                    return Conflict(new
+                    {
+                        error = "Ya existe una factura para esta orden",
+                        idFactura = facturaExistente.IdFactura,
+                        numeroFactura = facturaExistente.NumeroFactura
+                    });
                 }
 
-                // Validar datos del cliente
-                if (string.IsNullOrWhiteSpace(request.RUC_DNI_Cliente))
-                {
-                    return BadRequest(new { error = "El RUC/DNI del cliente es requerido" });
-                }
-
-                if (string.IsNullOrWhiteSpace(request.NombreCliente))
-                {
-                    return BadRequest(new { error = "El nombre del cliente es requerido" });
-                }
-
-                if (string.IsNullOrWhiteSpace(request.DireccionCliente))
-                {
-                    return BadRequest(new { error = "La dirección del cliente es requerida" });
-                }
-
-                // Calcular totales (ejemplo simple, puedes ajustar la lógica de impuestos)
+                // Calcular totales
                 decimal totalBruto = orden.Total;
                 decimal impuestos = totalBruto * 0.16m; // 16% de IVA
                 decimal totalNeto = totalBruto + impuestos;
 
+                _logger.LogInformation($"Cálculos: Bruto={totalBruto}, Impuestos={impuestos}, Neto={totalNeto}");
+
                 // Generar número de factura único
                 string numeroFactura = GenerarNumeroFactura();
+                _logger.LogInformation($"Número de factura generado: {numeroFactura}");
 
                 // Crear la factura
                 var factura = new Factura
@@ -262,20 +268,46 @@ namespace eromodeshopp.Controllers
                     Impuestos = impuestos,
                     TotalNeto = totalNeto,
                     Estado = "emitida",
-                    PDF_URL = null, // Se puede generar después
+                    PDF_URL = null,
                     FechaCreacion = DateTime.UtcNow,
                     FechaModificacion = DateTime.UtcNow,
                     UsuarioCreacion = User.Identity?.Name ?? "sistema",
                     UsuarioModificacion = User.Identity?.Name ?? "sistema"
                 };
 
-                _context.Facturas.Add(factura);
-                await _context.SaveChangesAsync();
+                _logger.LogInformation($"Creando factura: {System.Text.Json.JsonSerializer.Serialize(factura)}");
+
+                try
+                {
+                    _context.Facturas.Add(factura);
+                    _logger.LogInformation("Guardando factura en base de datos...");
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation($"Factura guardada exitosamente con ID: {factura.IdFactura}");
+                }
+                catch (DbUpdateException dbEx)
+                {
+                    _logger.LogError(dbEx, $"Error de base de datos al guardar factura: {dbEx.InnerException?.Message}");
+
+                    // Detalles específicos de error de base de datos
+                    if (dbEx.InnerException != null)
+                    {
+                        return StatusCode(500, new
+                        {
+                            error = "Error de base de datos al guardar la factura",
+                            details = dbEx.InnerException.Message,
+                            tipo = "DbUpdateException"
+                        });
+                    }
+
+                    throw;
+                }
 
                 // Actualizar estado de la orden
+                _logger.LogInformation($"Actualizando estado de orden {idOrden} a 'facturada'...");
                 orden.status = "facturada";
                 orden.FechaModificacion = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
+                _logger.LogInformation($"Estado de orden actualizado exitosamente");
 
                 var facturaDto = new FacturaDto
                 {
@@ -294,12 +326,28 @@ namespace eromodeshopp.Controllers
                     FechaCreacion = factura.FechaCreacion
                 };
 
+                _logger.LogInformation($"Factura generada exitosamente: {System.Text.Json.JsonSerializer.Serialize(facturaDto)}");
+
                 return CreatedAtAction(nameof(GetFactura), new { id = factura.IdFactura }, facturaDto);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error al generar factura para orden {idOrden}");
-                return StatusCode(500, new { error = "Error interno del servidor al generar la factura" });
+                _logger.LogError(ex, $"Error crítico al generar factura para orden {idOrden}");
+                _logger.LogError($"StackTrace: {ex.StackTrace}");
+
+                if (ex.InnerException != null)
+                {
+                    _logger.LogError($"InnerException: {ex.InnerException.Message}");
+                    _logger.LogError($"InnerException StackTrace: {ex.InnerException.StackTrace}");
+                }
+
+                return StatusCode(500, new
+                {
+                    error = "Error interno del servidor al generar la factura",
+                    details = ex.Message,
+                    innerDetails = ex.InnerException?.Message,
+                    stackTrace = ex.StackTrace
+                });
             }
         }
 
@@ -500,15 +548,16 @@ namespace eromodeshopp.Controllers
     public class GenerarFacturaRequest
     {
         [Required(ErrorMessage = "El RUC/DNI del cliente es requerido")]
-        [StringLength(20, MinimumLength = 8, ErrorMessage = "El RUC/DNI debe tener entre 8 y 20 caracteres")]
+        [StringLength(20, MinimumLength = 5, ErrorMessage = "El RUC/DNI debe tener entre 5 y 20 caracteres")]
+        [RegularExpression(@"^[0-9]+$", ErrorMessage = "El RUC/DNI debe contener solo números")]
         public string RUC_DNI_Cliente { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "El nombre del cliente es requerido")]
-        [StringLength(200, ErrorMessage = "El nombre no puede exceder 200 caracteres")]
+        [StringLength(255, MinimumLength = 3, ErrorMessage = "El nombre debe tener entre 3 y 255 caracteres")] // Cambiar de 200 a 255
         public string NombreCliente { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "La dirección del cliente es requerida")]
-        [StringLength(500, ErrorMessage = "La dirección no puede exceder 500 caracteres")]
+        [MinLength(5, ErrorMessage = "La dirección debe tener al menos 5 caracteres")] // Quitar StringLength porque es text
         public string DireccionCliente { get; set; } = string.Empty;
     }
 
